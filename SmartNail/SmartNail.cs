@@ -17,22 +17,20 @@ namespace SmartNail
                            ILocalSettings<Smartnail.LocalSettings>,
                            IMenuMod
     {
-        // Scenes where nail boosts should NOT be applied
+        // Scenes to ignore boosting
         private static readonly HashSet<string> ExcludedScenes = new()
         {
             "Menu_Title",
             "Quit_To_Menu"
         };
 
-        // ——————————————————————————————————————————————————————
-        //     Settings / Menu
-        // ——————————————————————————————————————————————————————
-
+        // — Settings & Menu —
         public Settings GlobalSettings { get; set; } = new Settings();
         public LocalSettings LocalUserSettings { get; set; } = new LocalSettings();
+
         public bool ToggleButtonInsideMenu => false;
         public List<IMenuMod.MenuEntry> GetMenuData(IMenuMod.MenuEntry? toggleButtonEntry) => new()
-           {
+        {
             new IMenuMod.MenuEntry {
                 Name        = "Godhome Scenes",
                 Description = "Toggle auto-boost for Gohome bosses",
@@ -51,43 +49,34 @@ namespace SmartNail
 
         public class LocalSettings
         {
-            public int StoredNailLevel  = -1;
-            public int StoredNailDamage = -1;
-            public bool StoredHonedNail = false;
+            public int  StoredNailLevel  = -1;
+            public int  StoredNailDamage = -1;
+            public bool StoredHonedNail  = false;
         }
 
-        // ——————————————————————————————————————————————————————
-        //     Internal state
-        // ——————————————————————————————————————————————————————
-
-        private int     _backedUpUnclaimedUpgrades = -1;
-        private bool    _isNewGameFlag;
-        private bool    _modulesRegistered;
+        // — Internal State —
+        private int      _backedUpUnclaimedUpgrades = -1;
+        private bool     _isNewGameFlag;
+        private bool     _modulesRegistered;
         private Coroutine _monitorCoroutine;
 
-        // ——————————————————————————————————————————————————————
-        //     Initialization & Hooks
-        // ——————————————————————————————————————————————————————
-
-        public override string GetVersion() => "1.0.0";
-
-        public void OnLoadGlobal(Settings s)        => GlobalSettings    = s ?? new Settings();
-        public Settings OnSaveGlobal()              => GlobalSettings;
-        public void OnLoadLocal(LocalSettings s)    => LocalUserSettings = s ?? new LocalSettings();
-        public LocalSettings OnSaveLocal()          => LocalUserSettings;
+        // — Initialization & Hooks —
+        public override string GetVersion() => "1.3.0";
+        public void OnLoadGlobal(Settings s)     => GlobalSettings    = s ?? new Settings();
+        public Settings OnSaveGlobal()           => GlobalSettings;
+        public void OnLoadLocal(LocalSettings s) => LocalUserSettings = s ?? new LocalSettings();
+        public LocalSettings OnSaveLocal()       => LocalUserSettings;
 
         public override void Initialize(Dictionary<string, Dictionary<string, GameObject>> preloaded)
         {
-            Log("Smartnail: Initialize");
+            Log("Initialize");
 
-            // dependencies
             if (ModHooks.GetMod("ItemChangerMod") == null || ModHooks.GetMod("RandoPlus") == null)
             {
                 Log("[Warning] Missing ItemChangerMod or RandoPlus; disabling Smartnail.");
                 return;
             }
 
-            // hooks
             Events.BeforeStartNewGame           += OnBeforeStartNewGame;
             Events.OnEnterGame                  += OnEnterGame;
             ModHooks.SavegameSaveHook           += OnSaveGame;
@@ -104,10 +93,7 @@ namespace SmartNail
             UnityEngine.SceneManagement.SceneManager.sceneLoaded            -= OnSceneLoaded;
         }
 
-        // ——————————————————————————————————————————————————————
-        //     Base-stat storage
-        // ——————————————————————————————————————————————————————
-
+        // — Base-stat Storage —
         private void OnBeforeStartNewGame() => _isNewGameFlag = true;
 
         private void OnEnterGame()
@@ -121,20 +107,19 @@ namespace SmartNail
             if (!_modulesRegistered && ItemChangerMod.Modules != null)
             {
                 _modulesRegistered = true;
-                Log("Smartnail: ItemChanger modules available.");
+               
             }
         }
 
         private void OnSaveGame(int id)
         {
             if (PlayerData.instance == null) return;
-            string scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
 
-            // only snapshot base when NOT in boost / excluded
             if (!GlobalSettings.IsSceneEnabled(scene) && !ExcludedScenes.Contains(scene))
             {
                 StoreBaseNailStats();
-                Log("Smartnail: Stored base nail stats on save.");
+                Log(" Stored base nail stats on save.");
             }
         }
 
@@ -143,116 +128,102 @@ namespace SmartNail
             LocalUserSettings.StoredNailLevel  = PlayerData.instance.GetInt(nameof(PlayerData.nailSmithUpgrades));
             LocalUserSettings.StoredNailDamage = PlayerData.instance.GetInt(nameof(PlayerData.nailDamage));
             LocalUserSettings.StoredHonedNail  = PlayerData.instance.GetBool(nameof(PlayerData.honedNail));
-            Log($"Smartnail: Base stats stored → Level={LocalUserSettings.StoredNailLevel}, Damage={LocalUserSettings.StoredNailDamage}, Honed={LocalUserSettings.StoredHonedNail}");
+            //this could potentially be useful but its unlikely so i'm leaving it like that
+            //LogFine($": Base stats stored → Level={LocalUserSettings.StoredNailLevel}, Damage={LocalUserSettings.StoredNailDamage}, Honed={LocalUserSettings.StoredHonedNail}");
         }
 
-        // ——————————————————————————————————————————————————————
-        //     Scene-transition: restore on exit of boost
-        // ——————————————————————————————————————————————————————
-
+        // — Scene Transition: Restore on Exit of Boost Chain —
         private void GameManager_BeginSceneTransition(
             On.GameManager.orig_BeginSceneTransition orig,
             GameManager self,
             GameManager.SceneLoadInfo info)
         {
+            orig(self, info);
+
             bool isBoost = GlobalSettings.IsSceneEnabled(info.SceneName);
-            Log($"Smartnail: BeginSceneTransition → {info.SceneName}, Boost={isBoost}");
+            LogFine($"Smartnail: BeginSceneTransition → {info.SceneName}, Boost={isBoost}");
 
             var mod = ItemChangerMod.Modules?.Get<DelayedNailUpgradeModule>();
             if (mod != null && !isBoost && _backedUpUnclaimedUpgrades >= 0)
             {
-                // restore unclaimed count
                 mod.UnclaimedUpgrades = _backedUpUnclaimedUpgrades;
                 _backedUpUnclaimedUpgrades = -1;
 
-                // restore true base stats
-                PlayerData.instance.SetInt  (nameof(PlayerData.nailSmithUpgrades), LocalUserSettings.StoredNailLevel);
-                PlayerData.instance.SetInt  (nameof(PlayerData.nailDamage),       LocalUserSettings.StoredNailDamage);
-                PlayerData.instance.SetBool (nameof(PlayerData.honedNail),      LocalUserSettings.StoredHonedNail);
+                PlayerData.instance.SetInt(nameof(PlayerData.nailSmithUpgrades), LocalUserSettings.StoredNailLevel);
+                PlayerData.instance.SetInt(nameof(PlayerData.nailDamage),       LocalUserSettings.StoredNailDamage);
+                PlayerData.instance.SetBool(nameof(PlayerData.honedNail),       LocalUserSettings.StoredHonedNail);
                 PlayMakerFSM.BroadcastEvent("UPDATE NAIL DAMAGE");
 
-                Log("Smartnail: Restored base stats and unclaimed upgrades after boost.");
+                LogFine("Restored base stats and unclaimed upgrades after boost.");
 
-                // stop monitoring
                 if (_monitorCoroutine != null)
                 {
                     GameManager.instance.StopCoroutine(_monitorCoroutine);
                     _monitorCoroutine = null;
                 }
             }
-
-            orig(self, info);
         }
 
-        // ——————————————————————————————————————————————————————
-        //     Scene-loaded: snapshot & apply boost, then monitor
-        // ——————————————————————————————————————————————————————
-
+        // — Scene Loaded: Delayed Snapshot & Apply Boost, Then Monitor —
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             if (ExcludedScenes.Contains(scene.name) || PlayerData.instance == null)
                 return;
 
             bool isBoost = GlobalSettings.IsSceneEnabled(scene.name);
-            Log($"Smartnail: SceneLoaded → {scene.name}, Boost={isBoost}");
+            LogFine($" SceneLoaded → {scene.name}, Boost={isBoost}");
+
+            if (_monitorCoroutine != null)
+            {
+                GameManager.instance.StopCoroutine(_monitorCoroutine);
+                _monitorCoroutine = null;
+            }
 
             if (isBoost)
             {
-                // kill any existing monitor
-                if (_monitorCoroutine != null)
-                {
-                    GameManager.instance.StopCoroutine(_monitorCoroutine);
-                    _monitorCoroutine = null;
-                }
-
-                var mod = ItemChangerMod.Modules?.Get<DelayedNailUpgradeModule>();
-                if (mod == null)
-                {
-                    Log("[Warning] DelayedNailUpgradeModule missing on scene load.");
-                    return;
-                }
-
-                // **snapshot once** per boost sequence
-                if (_backedUpUnclaimedUpgrades < 0)
-                {
-                    _backedUpUnclaimedUpgrades = mod.UnclaimedUpgrades;
-                    mod.UnclaimedUpgrades = 0;  // zero it out so future pickups are “new”
-                    Log($"Smartnail: Backed up {_backedUpUnclaimedUpgrades} unclaimed upgrades.");
-                }
-
-                // apply initial boost exactly once
-                int lvl = LocalUserSettings.StoredNailLevel  + _backedUpUnclaimedUpgrades;
-                int dmg = LocalUserSettings.StoredNailDamage + _backedUpUnclaimedUpgrades * mod.DamagePerNailUpgrade;
-                PlayerData.instance.SetInt  (nameof(PlayerData.nailSmithUpgrades), lvl);
-                PlayerData.instance.SetInt  (nameof(PlayerData.nailDamage),       dmg);
-                PlayerData.instance.SetBool (nameof(PlayerData.honedNail),      true);
-                PlayMakerFSM.BroadcastEvent("UPDATE NAIL DAMAGE");
-                Log($"Smartnail: Applied initial boost → Level={lvl}, Damage={dmg}");
-
-                // then start monitoring for genuinely new pickups
-                _monitorCoroutine = GameManager.instance.StartCoroutine(BoostMonitorRoutine());
+                _monitorCoroutine = GameManager.instance.StartCoroutine(DelayedBoostApplication());
             }
             else
             {
-                // leaving boost scene: stop monitor & clear backup
-                if (_monitorCoroutine != null)
-                {
-                    GameManager.instance.StopCoroutine(_monitorCoroutine);
-                    _monitorCoroutine = null;
-                }
-
                 _backedUpUnclaimedUpgrades = -1;
-                Log("Smartnail: Cleared backup on leaving boost scene.");
+                LogFine(" Cleared backup on leaving boost scene.");
             }
         }
 
-        // ——————————————————————————————————————————————————————
-        //     Coroutine: watch for new pickups in boost
-        // ——————————————————————————————————————————————————————
+        private IEnumerator DelayedBoostApplication()
+        {
+            yield return null;
+            yield return new WaitForSeconds(0.1f);
 
+            var mod = ItemChangerMod.Modules?.Get<DelayedNailUpgradeModule>();
+            if (mod == null)
+            {
+                Modding.Logger.Log("[Warning] DelayedNailUpgradeModule missing after delay.");
+                yield break;
+            }
+
+            if (_backedUpUnclaimedUpgrades < 0)
+            {
+                _backedUpUnclaimedUpgrades = mod.UnclaimedUpgrades;
+                mod.UnclaimedUpgrades = 0;
+                LogFine($" Backed up {_backedUpUnclaimedUpgrades} unclaimed upgrades.");
+            }
+
+            int lvl = LocalUserSettings.StoredNailLevel  + _backedUpUnclaimedUpgrades;
+            int dmg = LocalUserSettings.StoredNailDamage + _backedUpUnclaimedUpgrades * mod.DamagePerNailUpgrade;
+            PlayerData.instance.SetInt(nameof(PlayerData.nailSmithUpgrades), lvl);
+            PlayerData.instance.SetInt(nameof(PlayerData.nailDamage),       dmg);
+            PlayerData.instance.SetBool(nameof(PlayerData.honedNail),      true);
+            PlayMakerFSM.BroadcastEvent("UPDATE NAIL DAMAGE");
+
+            LogFine($" Applied initial boost → Level={lvl}, Damage={dmg}");
+
+            _monitorCoroutine = GameManager.instance.StartCoroutine(BoostMonitorRoutine());
+        }
+
+        // monitors for new upgrades mid-fight
         private IEnumerator BoostMonitorRoutine()
         {
-            // small delay to let things settle
             yield return new WaitForSeconds(1f);
 
             var mod = ItemChangerMod.Modules?.Get<DelayedNailUpgradeModule>();
@@ -269,15 +240,14 @@ namespace SmartNail
                 if (gained > 0)
                 {
                     _backedUpUnclaimedUpgrades = now;
-                    Log($"Smartnail: Detected +{gained} new upgrades in boost scene.");
+                    LogFine($" Detected +{gained} new upgrades mid-scene.");
                 }
 
-                // reapply boost (base + all unclaimed)
                 int lvl = LocalUserSettings.StoredNailLevel  + _backedUpUnclaimedUpgrades;
                 int dmg = LocalUserSettings.StoredNailDamage + _backedUpUnclaimedUpgrades * mod.DamagePerNailUpgrade;
-                PlayerData.instance.SetInt  (nameof(PlayerData.nailSmithUpgrades), lvl);
-                PlayerData.instance.SetInt  (nameof(PlayerData.nailDamage),       dmg);
-                PlayerData.instance.SetBool (nameof(PlayerData.honedNail),      true);
+                PlayerData.instance.SetInt(nameof(PlayerData.nailSmithUpgrades), lvl);
+                PlayerData.instance.SetInt(nameof(PlayerData.nailDamage),       dmg);
+                PlayerData.instance.SetBool(nameof(PlayerData.honedNail),      true);
                 PlayMakerFSM.BroadcastEvent("UPDATE NAIL DAMAGE");
 
                 yield return new WaitForSeconds(1.5f);
