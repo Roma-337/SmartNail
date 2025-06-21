@@ -61,7 +61,7 @@ namespace SmartNail
         private Coroutine _monitorCoroutine;
 
         // — Initialization & Hooks —
-        public override string GetVersion() => "1.3.5";
+        public override string GetVersion() => "1.3.5.5";
         public void OnLoadGlobal(Settings s)     => GlobalSettings    = s ?? new Settings();
         public Settings OnSaveGlobal()           => GlobalSettings;
         public void OnLoadLocal(LocalSettings s) => LocalUserSettings = s ?? new LocalSettings();
@@ -79,7 +79,6 @@ namespace SmartNail
 
             Events.BeforeStartNewGame           += OnBeforeStartNewGame;
             Events.OnEnterGame                  += OnEnterGame;
-            ModHooks.SavegameSaveHook           += OnSaveGame;
             On.GameManager.BeginSceneTransition += GameManager_BeginSceneTransition;
             UnityEngine.SceneManagement.SceneManager.sceneLoaded            += OnSceneLoaded;
 
@@ -93,7 +92,6 @@ namespace SmartNail
         {
             Events.BeforeStartNewGame           -= OnBeforeStartNewGame;
             Events.OnEnterGame                  -= OnEnterGame;
-            ModHooks.SavegameSaveHook           -= OnSaveGame;
             On.GameManager.BeginSceneTransition -= GameManager_BeginSceneTransition;
             UnityEngine.SceneManagement.SceneManager.sceneLoaded            -= OnSceneLoaded;
 
@@ -120,17 +118,6 @@ namespace SmartNail
             }
         }
 
-        private void OnSaveGame(int id)
-        {
-            if (PlayerData.instance == null) return;
-            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
-
-            if (!GlobalSettings.IsSceneEnabled(scene) && !ExcludedScenes.Contains(scene))
-            {
-                StoreBaseNailStats();
-                LogFine(" Stored base nail stats on save.");
-            }
-        }
 
         private void StoreBaseNailStats()
         {
