@@ -61,7 +61,7 @@ namespace SmartNail
         private Coroutine _monitorCoroutine;
 
         // — Initialization & Hooks —
-        public override string GetVersion() => "1.3.0";
+        public override string GetVersion() => "1.3.5";
         public void OnLoadGlobal(Settings s)     => GlobalSettings    = s ?? new Settings();
         public Settings OnSaveGlobal()           => GlobalSettings;
         public void OnLoadLocal(LocalSettings s) => LocalUserSettings = s ?? new LocalSettings();
@@ -82,6 +82,11 @@ namespace SmartNail
             ModHooks.SavegameSaveHook           += OnSaveGame;
             On.GameManager.BeginSceneTransition += GameManager_BeginSceneTransition;
             UnityEngine.SceneManagement.SceneManager.sceneLoaded            += OnSceneLoaded;
+
+            // --- New: hook IncrementInt and IntAdd as well as SetInt to catch nail upgrades immediately —
+            On.PlayerData.SetInt       += PlayerData_SetInt;
+            On.PlayerData.IncrementInt += PlayerData_IncrementInt;
+            On.PlayerData.IntAdd       += PlayerData_IntAdd;
         }
 
         public void Unload()
@@ -91,6 +96,11 @@ namespace SmartNail
             ModHooks.SavegameSaveHook           -= OnSaveGame;
             On.GameManager.BeginSceneTransition -= GameManager_BeginSceneTransition;
             UnityEngine.SceneManagement.SceneManager.sceneLoaded            -= OnSceneLoaded;
+
+            // Remove hooks
+            On.PlayerData.SetInt       -= PlayerData_SetInt;
+            On.PlayerData.IncrementInt -= PlayerData_IncrementInt;
+            On.PlayerData.IntAdd       -= PlayerData_IntAdd;
         }
 
         // — Base-stat Storage —
@@ -107,7 +117,6 @@ namespace SmartNail
             if (!_modulesRegistered && ItemChangerMod.Modules != null)
             {
                 _modulesRegistered = true;
-               
             }
         }
 
@@ -119,7 +128,7 @@ namespace SmartNail
             if (!GlobalSettings.IsSceneEnabled(scene) && !ExcludedScenes.Contains(scene))
             {
                 StoreBaseNailStats();
-                Log(" Stored base nail stats on save.");
+                LogFine(" Stored base nail stats on save.");
             }
         }
 
@@ -229,7 +238,7 @@ namespace SmartNail
             var mod = ItemChangerMod.Modules?.Get<DelayedNailUpgradeModule>();
             if (mod == null)
             {
-                Log("[Warning] DelayedNailUpgradeModule missing in boost monitor.");
+                Modding.Logger.Log("[Warning] DelayedNailUpgradeModule missing in boost monitor.");
                 yield break;
             }
 
@@ -240,7 +249,7 @@ namespace SmartNail
                 if (gained > 0)
                 {
                     _backedUpUnclaimedUpgrades = now;
-                    LogFine($" Detected +{gained} new upgrades mid-scene.");
+                    Modding.Logger.Log($" Detected +{gained} new upgrades mid-scene.");
                 }
 
                 int lvl = LocalUserSettings.StoredNailLevel  + _backedUpUnclaimedUpgrades;
@@ -251,6 +260,49 @@ namespace SmartNail
                 PlayMakerFSM.BroadcastEvent("UPDATE NAIL DAMAGE");
 
                 yield return new WaitForSeconds(1.5f);
+            }
+        }
+
+        // — New hooks: detect direct changes to nailSmithUpgrades/nailDamage so we update base stats immediately —
+        private void PlayerData_SetInt(On.PlayerData.orig_SetInt orig, PlayerData self, string fieldName, int value)
+        {
+            orig(self, fieldName, value);
+            if (fieldName == nameof(PlayerData.nailSmithUpgrades))
+            {
+                string currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+                if (!GlobalSettings.IsSceneEnabled(currentScene) && !ExcludedScenes.Contains(currentScene))
+                {
+                    StoreBaseNailStats();
+                    LogFine($" Detected SetInt on nailSmithUpgrades outside boost; base stats updated → Level={LocalUserSettings.StoredNailLevel}, Damage={LocalUserSettings.StoredNailDamage}");
+                }
+            }
+        }
+
+        private void PlayerData_IncrementInt(On.PlayerData.orig_IncrementInt orig, PlayerData self, string fieldName)
+        {
+            orig(self, fieldName);
+            if (fieldName == nameof(PlayerData.nailSmithUpgrades))
+            {
+                string currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+                if (!GlobalSettings.IsSceneEnabled(currentScene) && !ExcludedScenes.Contains(currentScene))
+                {
+                    StoreBaseNailStats();
+                    LogFine($" Detected IncrementInt on nailSmithUpgrades outside boost; base stats updated → Level={LocalUserSettings.StoredNailLevel}, Damage={LocalUserSettings.StoredNailDamage}");
+                }
+            }
+        }
+
+        private void PlayerData_IntAdd(On.PlayerData.orig_IntAdd orig, PlayerData self, string fieldName, int add)
+        {
+            orig(self, fieldName, add);
+            if (fieldName == nameof(PlayerData.nailSmithUpgrades) || fieldName == nameof(PlayerData.nailDamage))
+            {
+                string currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+                if (!GlobalSettings.IsSceneEnabled(currentScene) && !ExcludedScenes.Contains(currentScene))
+                {
+                    StoreBaseNailStats();
+                    LogFine($" Detected IntAdd on {fieldName} outside boost; base stats updated → Level={LocalUserSettings.StoredNailLevel}, Damage={LocalUserSettings.StoredNailDamage}");
+                }
             }
         }
     }
