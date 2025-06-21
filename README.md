@@ -5,4 +5,4 @@ Has an option to turn either of these off.<br>
 
 Will only work if you create a save with the mod already on.<br>
 
-Disables itself if you use combat or curse rando.At least per version 1.0.
+Disables itself if you use combat or curse rando.At least for now.
